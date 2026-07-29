@@ -1,0 +1,32 @@
+# This fixture-backed configuration works offline. Replace fixture:// URLs with a
+# permitted public site and adjust only selectors to adapt it to another directory.
+name: university-faculty-directory
+mode: static
+fixture_dir: ../fixtures/faculty_directory
+start_urls:
+  - fixture://faculty/page1.html
+record_selector: article.faculty-card
+fields:
+  name:
+    selector: h2.name
+  email:
+    selector: a.email
+    attribute: href
+    strip_prefix: "mailto:"
+  job_title:
+    selector: p.job-title
+  institution:
+    selector: p.institution
+  profile_url:
+    selector: a.profile
+    attribute: href
+pagination:
+  selector: a.next
+  attribute: href
+  max_pages: 5
+required_fields: [name, email, job_title, institution]
+timeout_seconds: 10
+requests_per_second: 1
+retries: 2
+respect_robots_txt: true
+

@@ -1,0 +1,19 @@
+{
+  "results": [
+    {
+      "full_name": "Dr. Bob Smith",
+      "contact": {"email": "bob.smith@example.edu"},
+      "title": "Lecturer",
+      "organization": {"name": "Example University"},
+      "profile_path": "/people/bob-smith"
+    },
+    {
+      "full_name": "Dr. Carol Jones",
+      "contact": {"email": "carol.example.edu"},
+      "title": "",
+      "organization": {"name": "Example University"},
+      "profile_path": "/people/carol-jones"
+    }
+  ],
+  "pagination": {"next": null}
+}

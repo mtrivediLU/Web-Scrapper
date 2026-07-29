@@ -1,0 +1,21 @@
+name: university-faculty-api
+mode: api
+fixture_dir: ../fixtures/faculty_directory
+start_urls:
+  - fixture://faculty/api-page1.json
+records_path: results
+fields:
+  name: full_name
+  email: contact.email
+  job_title: title
+  institution: organization.name
+  profile_url: profile_path
+pagination:
+  next_path: pagination.next
+  max_pages: 5
+required_fields: [name, email, job_title, institution]
+timeout_seconds: 10
+requests_per_second: 1
+retries: 2
+respect_robots_txt: true
+

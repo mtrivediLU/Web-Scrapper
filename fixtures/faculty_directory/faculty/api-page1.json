@@ -1,0 +1,20 @@
+{
+  "results": [
+    {
+      "full_name": "Dr. Alice Nguyen",
+      "contact": {"email": "Alice.Nguyen@Example.edu"},
+      "title": "Associate Professor",
+      "organization": {"name": "Example University"},
+      "profile_path": "/people/alice-nguyen"
+    },
+    {
+      "full_name": "Dr. Bob Smith",
+      "contact": {"email": "bob.smith@example.edu"},
+      "title": "Lecturer",
+      "organization": {"name": "Example University"},
+      "profile_path": "/people/bob-smith"
+    }
+  ],
+  "pagination": {"next": "api-page2.json"}
+}
+
