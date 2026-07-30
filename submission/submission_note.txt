@@ -1,0 +1,7 @@
+Run `python submission/Mihir_Trivedi_UO_Faculty_Scraper.txt` from an environment with the project dependencies installed.
+The scraper first reads the public directory index, then requests every linked alphabetical directory page once.
+It uses server-rendered HTML with HTTPX and Beautiful Soup because no reliable public JSON/API endpoint was exposed by the directory page.
+The implementation checks robots.txt, uses a descriptive user agent, a 20-second timeout, retry backoff, and about one second between requests.
+Names retain middle-name, hyphen, and apostrophe punctuation; the last whitespace-delimited token is exported as last name.
+Typical completion time is about 15 seconds, depending on the number of alphabetical pages and network latency.
+Future improvements could add change detection, stronger name-suffix parsing, and an approved contact address for operational use.

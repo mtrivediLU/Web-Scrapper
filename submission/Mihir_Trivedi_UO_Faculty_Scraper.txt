@@ -1,0 +1,222 @@
+"""Export the public University of Oregon Computer Science faculty directory.
+
+Run with: python Mihir_Trivedi_UO_Faculty_Scraper.txt
+Requires: httpx, beautifulsoup4, lxml, and openpyxl.
+"""
+
+from __future__ import annotations
+
+import csv
+import time
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from urllib.parse import urljoin, urlparse
+from urllib.robotparser import RobotFileParser
+
+import httpx
+from bs4 import BeautifulSoup, Tag
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill
+from openpyxl.utils import get_column_letter
+
+DIRECTORY_URL = "https://cas.uoregon.edu/directory/computer-science-faculty"
+DEPARTMENT = "Computer Science"
+COLUMNS = [
+    "first_name",
+    "last_name",
+    "title",
+    "department",
+    "email",
+    "profile_url",
+    "source_url",
+]
+USER_AGENT = (
+    "Mihir-Trivedi-UO-Faculty-Scraper/1.0 "
+    "(+https://github.com/mtrivediLU/Web-Scrapper; educational assessment)"
+)
+
+
+def clean_text(value: object) -> str:
+    return " ".join(str(value or "").replace("\xa0", " ").split())
+
+
+def clean_email(value: object) -> str:
+    return clean_text(value).removeprefix("mailto:").lower()
+
+
+def valid_email(email: str) -> bool:
+    local, separator, domain = email.partition("@")
+    return not email or bool(local and separator and domain and "." in domain and " " not in email)
+
+
+@dataclass(frozen=True, slots=True)
+class FacultyRecord:
+    first_name: str
+    last_name: str
+    title: str
+    department: str
+    email: str
+    profile_url: str
+    source_url: str
+
+    def as_row(self) -> dict[str, str]:
+        return asdict(self)
+
+
+class ResponsibleClient:
+    """HTTPX requests with robots.txt, timeouts, retry backoff, and one-second pacing."""
+
+    def __init__(self) -> None:
+        self.client = httpx.Client(
+            timeout=20,
+            follow_redirects=True,
+            headers={"User-Agent": USER_AGENT, "Accept": "text/html"},
+        )
+        self.last_request = 0.0
+        self.robots: dict[str, RobotFileParser] = {}
+
+    def close(self) -> None:
+        self.client.close()
+
+    def _allow(self, url: str) -> None:
+        parsed = urlparse(url)
+        origin = f"{parsed.scheme}://{parsed.netloc}"
+        parser = self.robots.get(origin)
+        if parser is None:
+            robots_url = urljoin(origin, "/robots.txt")
+            parser = RobotFileParser(robots_url)
+            response = self.client.get(robots_url)
+            parser.parse(response.text.splitlines() if response.is_success else [])
+            self.robots[origin] = parser
+        if not parser.can_fetch(USER_AGENT, url):
+            raise PermissionError(f"robots.txt disallows {url}")
+
+    def get_text(self, url: str) -> str:
+        self._allow(url)
+        wait = 1 - (time.monotonic() - self.last_request)
+        if wait > 0:
+            time.sleep(wait)
+        self.last_request = time.monotonic()
+        for attempt in range(3):
+            try:
+                response = self.client.get(url)
+                response.raise_for_status()
+                return response.text
+            except httpx.HTTPError:
+                if attempt == 2:
+                    raise
+                time.sleep(2**attempt)
+        raise AssertionError("unreachable")
+
+
+def split_name(name: str) -> tuple[str, str]:
+    parts = clean_text(name).split()
+    if len(parts) < 2:
+        return (parts[0], "") if parts else ("", "")
+    return " ".join(parts[:-1]), parts[-1]
+
+
+def field_text(row: Tag, selector: str) -> str:
+    values = [clean_text(node.get_text(" ", strip=True)) for node in row.select(selector)]
+    return " | ".join(value for value in values if value)
+
+
+def parse_directory_page(html: str, source_url: str) -> list[FacultyRecord]:
+    soup = BeautifulSoup(html, "lxml")
+    records: list[FacultyRecord] = []
+    for row in soup.select(".view-content > .listing__row"):
+        name_link = row.select_one("h2.views-field-lname a[href]")
+        name = clean_text(name_link.get_text(" ", strip=True)) if name_link else ""
+        email_link = row.select_one(".views-field-email a[href^='mailto:']")
+        email = clean_email(email_link.get("href", "")) if email_link else ""
+        if email and not valid_email(email):
+            email = ""
+        first_name, last_name = split_name(name)
+        record = FacultyRecord(
+            first_name=first_name,
+            last_name=last_name,
+            title=field_text(
+                row,
+                ".views-field-job-title > .field-content, .views-field-job-title2 > .field-content",
+            ),
+            department=DEPARTMENT,
+            email=email,
+            profile_url=urljoin(source_url, str(name_link.get("href", ""))) if name_link else "",
+            source_url=source_url,
+        )
+        if any((record.first_name, record.last_name, record.email, record.profile_url)):
+            records.append(record)
+    return records
+
+
+def alphabetical_pages(index_html: str) -> list[str]:
+    soup = BeautifulSoup(index_html, "lxml")
+    pages: list[str] = []
+    for link in soup.select(".pager-alphabetical a[href]"):
+        page = urljoin(DIRECTORY_URL, str(link["href"]))
+        if page not in pages:
+            pages.append(page)
+    return pages or [DIRECTORY_URL]
+
+
+def deduplicate(records: list[FacultyRecord]) -> tuple[list[FacultyRecord], int]:
+    unique: list[FacultyRecord] = []
+    seen: set[str] = set()
+    removed = 0
+    for record in records:
+        key = f"email:{record.email.lower()}" if record.email else f"profile:{record.profile_url.lower()}"
+        if key in seen:
+            removed += 1
+            continue
+        seen.add(key)
+        unique.append(record)
+    return unique, removed
+
+
+def write_csv(records: list[FacultyRecord], destination: Path) -> None:
+    with destination.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=COLUMNS)
+        writer.writeheader()
+        writer.writerows(record.as_row() for record in records)
+
+
+def write_excel(records: list[FacultyRecord], destination: Path) -> None:
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "Faculty"
+    worksheet.append(COLUMNS)
+    for record in records:
+        worksheet.append([record.as_row()[column] for column in COLUMNS])
+    worksheet.freeze_panes = "A2"
+    worksheet.auto_filter.ref = worksheet.dimensions
+    fill = PatternFill("solid", fgColor="1F4E78")
+    for cell in worksheet[1]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = fill
+    for index, column in enumerate(COLUMNS, start=1):
+        width = max(len(column), *(len(record.as_row()[column]) for record in records)) + 2
+        worksheet.column_dimensions[get_column_letter(index)].width = min(max(width, 12), 60)
+    workbook.save(destination)
+
+
+def main() -> None:
+    client = ResponsibleClient()
+    try:
+        index_html = client.get_text(DIRECTORY_URL)
+        pages = alphabetical_pages(index_html)
+        extracted = [record for page in pages for record in parse_directory_page(client.get_text(page), page)]
+    finally:
+        client.close()
+    records, duplicates = deduplicate(extracted)
+    output_dir = Path(__file__).resolve().parent
+    write_csv(records, output_dir / "uoregon_computer_science_faculty.csv")
+    write_excel(records, output_dir / "uoregon_computer_science_faculty.xlsx")
+    missing = sum(not value for record in records for value in record.as_row().values())
+    print(f"pages processed: {1 + len(pages)}")
+    print(f"exported rows: {len(records)}")
+    print(f"duplicates removed: {duplicates}")
+    print(f"missing field values: {missing}")
+
+
+if __name__ == "__main__":
+    main()
